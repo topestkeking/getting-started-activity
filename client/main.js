@@ -8,6 +8,7 @@ let auth;
 let currentUser;
 let gameState = null;
 let selectedPiece = null; // {r, c}
+let assets = {};
 
 const PIECES = {
   EMPTY: 0,
@@ -17,7 +18,18 @@ const PIECES = {
   BLACK_KING: 4,
 };
 
+async function loadAssets() {
+  try {
+    const response = await fetch('/assets.json');
+    assets = await response.json();
+    console.log('Assets loaded:', assets);
+  } catch (e) {
+    console.error('Failed to load assets manifest:', e);
+  }
+}
+
 async function setupDiscord() {
+  await loadAssets();
   discordSdk = new DiscordSDK(import.meta.env.VITE_DISCORD_CLIENT_ID);
   await discordSdk.ready();
 
@@ -52,6 +64,21 @@ async function setupDiscord() {
   }
 
   currentUser = auth.user;
+
+  // Cross-platform compatibility settings
+  try {
+    // Enable interactive PIP for desktop
+    await discordSdk.commands.setConfig({ use_interactive_pip: true });
+
+    // Lock orientation for mobile (Landscape is usually better for board games)
+    await discordSdk.commands.setOrientationLockState({
+      lock_state: 3, // LANDSCAPE
+      picture_in_picture_lock_state: 3, // LANDSCAPE
+      grid_lock_state: 1, // UNLOCKED
+    });
+  } catch (e) {
+    console.warn('Cross-platform commands not supported in this environment', e);
+  }
 
   // Subscribe to layout and orientation changes
   discordSdk.subscribe('ACTIVITY_LAYOUT_MODE_UPDATE', ({ layout_mode }) => {
@@ -94,7 +121,7 @@ async function updateRichPresence() {
       details: 'Playing Checkers',
       state: stateText,
       assets: {
-        large_image: 'rocket',
+        large_image: assets.rocket || 'rocket',
         large_text: 'Checkers',
       },
     },
