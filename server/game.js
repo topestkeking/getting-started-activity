@@ -12,6 +12,7 @@ export class CheckersGame {
     this.turn = PIECES.RED; // Red starts
     this.winner = null;
     this.mandatoryJumpMoves = []; // Stores possible jump moves for current turn
+    this.history = [];
     this.updateMandatoryJumps();
   }
 
@@ -134,6 +135,7 @@ export class CheckersGame {
     if (!move) return false;
 
     let piece = this.board[from.r][from.c];
+    const pieceName = this.getPieceName(piece);
 
     // Perform move
     this.board[to.r][to.c] = piece;
@@ -157,6 +159,15 @@ export class CheckersGame {
       promoted = true;
     }
 
+    this.history.push({
+      player: this.turn,
+      from,
+      to,
+      piece: pieceName,
+      captured: captured ? move.captured : null,
+      promoted
+    });
+
     if (captured && !promoted) {
       const furtherJumps = this.getPieceJumps(to.r, to.c);
       if (furtherJumps.length > 0) {
@@ -169,6 +180,24 @@ export class CheckersGame {
     this.updateMandatoryJumps();
     this.checkWinner();
     return true;
+  }
+
+  getPieceName(piece) {
+    if (piece === PIECES.RED) return "Red Pawn";
+    if (piece === PIECES.RED_KING) return "Red King";
+    if (piece === PIECES.BLACK) return "Black Pawn";
+    if (piece === PIECES.BLACK_KING) return "Black King";
+    return "Empty";
+  }
+
+  skipTurn() {
+    this.history.push({
+      player: this.turn,
+      action: "timeout"
+    });
+    this.turn = this.turn === PIECES.RED ? PIECES.BLACK : PIECES.RED;
+    this.updateMandatoryJumps();
+    this.checkWinner();
   }
 
   checkWinner() {
@@ -194,7 +223,8 @@ export class CheckersGame {
       board: this.board,
       turn: this.turn,
       winner: this.winner,
-      mandatoryJumpMoves: this.mandatoryJumpMoves
+      mandatoryJumpMoves: this.mandatoryJumpMoves,
+      history: this.history.slice(-10) // Only send last 10 for performance
     };
   }
 }

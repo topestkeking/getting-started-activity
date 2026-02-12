@@ -8,6 +8,7 @@ let auth;
 let currentUser;
 let gameState = null;
 let selectedPiece = null; // {r, c}
+let validMovesForSelected = []; // List of {to: {r, c}}
 
 const PIECES = {
   EMPTY: 0,
@@ -72,6 +73,9 @@ function setupSocket() {
 
   socket.on('state', (state) => {
     gameState = state;
+    // If the turn changed or board changed, clear selection
+    selectedPiece = null;
+    validMovesForSelected = [];
     render();
   });
 
@@ -84,6 +88,13 @@ function setupSocket() {
 
   socket.on('cheer', ({ userId }) => {
     showCheer(userId);
+  });
+
+  socket.on('validMoves', ({ r, c, moves }) => {
+    if (selectedPiece && selectedPiece.r === r && selectedPiece.c === c) {
+      validMovesForSelected = moves;
+      render();
+    }
   });
 }
 
@@ -100,6 +111,7 @@ function render() {
 
   let html = `
     <div class="game-container">
+      ${game.winner ? renderWinnerOverlay() : ''}
       <div class="header">
         <h1>Checkers</h1>
         <div class="status">${getStatusText()}</div>
@@ -127,6 +139,13 @@ function render() {
             <button id="reset-btn">Reset Game</button>
           </div>
         </div>
+
+        <div class="history-panel side">
+          <h3>Recent Moves</h3>
+          <div class="history-list">
+            ${renderHistory(game.history)}
+          </div>
+        </div>
       </div>
     </div>
   `;
@@ -145,6 +164,13 @@ function render() {
   document.getElementById('reset-btn').onclick = () => {
     socket.emit('reset', { instanceId: discordSdk.instanceId });
   };
+
+  const playAgainBtn = document.getElementById('play-again-btn');
+  if (playAgainBtn) {
+    playAgainBtn.onclick = () => {
+      socket.emit('reset', { instanceId: discordSdk.instanceId });
+    };
+  }
 }
 
 function renderBoard(board) {
@@ -154,7 +180,7 @@ function renderBoard(board) {
       const piece = board[r][c];
       const isDark = (r + c) % 2 === 1;
       const isSelected = selectedPiece && selectedPiece.r === r && selectedPiece.c === c;
-      const isValidMove = isPossibleMove(r, c);
+      const isValidMove = validMovesForSelected.some(m => m.to.r === r && m.to.c === c);
 
       cells += `
         <div class="cell ${isDark ? 'dark' : 'light'} ${isSelected ? 'selected' : ''} ${isValidMove ? 'valid-move' : ''}"
@@ -184,31 +210,33 @@ function handleCellClick(r, c) {
   const owner = getPieceOwner(piece);
 
   if (owner === myPlayer.role) {
-    selectedPiece = { r, c };
-    render();
+    if (selectedPiece && selectedPiece.r === r && selectedPiece.c === c) {
+      selectedPiece = null;
+      validMovesForSelected = [];
+      render();
+    } else {
+      selectedPiece = { r, c };
+      validMovesForSelected = []; // Clear while waiting
+      socket.emit('getValidMoves', { instanceId: discordSdk.instanceId, r, c });
+      render();
+    }
   } else if (selectedPiece) {
     // Attempt move
-    socket.emit('move', {
-      instanceId: discordSdk.instanceId,
-      from: selectedPiece,
-      to: { r, c }
-    });
-    selectedPiece = null;
-    // We don't render immediately, wait for server state
+    const isValid = validMovesForSelected.some(m => m.to.r === r && m.to.c === c);
+    if (isValid) {
+      socket.emit('move', {
+        instanceId: discordSdk.instanceId,
+        from: selectedPiece,
+        to: { r, c }
+      });
+      selectedPiece = null;
+      validMovesForSelected = [];
+    } else {
+      selectedPiece = null;
+      validMovesForSelected = [];
+      render();
+    }
   }
-}
-
-function isPossibleMove(r, c) {
-  if (!selectedPiece || !gameState) return false;
-  // This is a simple client-side check to highlight potential moves.
-  // The server has the final say.
-  // For simplicity, we could just let the server decide everything,
-  // but highlighting helps UX.
-  const { game } = gameState;
-  // We can't easily check all rules here without duplicating logic,
-  // but we can check if it's one of the valid moves for the selected piece.
-  // (Note: mandatory jumps make this tricky if we don't have full logic here)
-  return false; // Disable highlighting for now to avoid bugs, or implement light version
 }
 
 function getPieceOwner(piece) {
@@ -234,6 +262,38 @@ function getRoleName(role) {
 function getAvatarUrl(user) {
   if (!user.avatar) return 'https://cdn.discordapp.com/embed/avatars/0.png';
   return `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`;
+}
+
+function renderHistory(history) {
+  if (!history || history.length === 0) return '<div class="empty-history">No moves yet</div>';
+  return [...history].reverse().map(h => {
+    if (h.action === 'timeout') {
+      return `<div class="history-item timeout">Turn skipped (Timeout)</div>`;
+    }
+    return `
+      <div class="history-item">
+        <span class="history-piece">${h.piece}</span>:
+        ${h.from.r},${h.from.c} → ${h.to.r},${h.to.c}
+        ${h.captured ? '<span class="history-captured"> (Capture!)</span>' : ''}
+        ${h.promoted ? '<span class="history-promoted"> (King!)</span>' : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+function renderWinnerOverlay() {
+  const winnerRole = gameState.game.winner;
+  const winner = gameState.players.find(p => p.role === winnerRole);
+  const name = winner ? (winner.global_name || winner.username) : (winnerRole === PIECES.RED ? 'RED' : 'BLACK');
+
+  return `
+    <div class="overlay">
+      <div class="overlay-content">
+        <h2>🎉 ${name} Wins! 🎉</h2>
+        <button id="play-again-btn">Play Again</button>
+      </div>
+    </div>
+  `;
 }
 
 function updateTimerDisplay() {

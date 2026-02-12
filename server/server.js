@@ -93,9 +93,7 @@ function startTimer(instanceId) {
     state.timeLeft--;
     if (state.timeLeft <= 0) {
       // Auto-switch turn
-      state.game.turn = state.game.turn === PIECES.RED ? PIECES.BLACK : PIECES.RED;
-      state.game.updateMandatoryJumps();
-      state.game.checkWinner();
+      state.game.skipTurn();
       resetTimer(instanceId);
       broadcastState(instanceId);
     } else {
@@ -157,6 +155,13 @@ io.on("connection", (socket) => {
       resetTimer(instanceId);
       broadcastState(instanceId);
     }
+  });
+
+  socket.on("getValidMoves", ({ instanceId, r, c }) => {
+    const state = gameStates.get(instanceId);
+    if (!state) return;
+    const moves = state.game.getValidMoves(r, c);
+    socket.emit("validMoves", { r, c, moves });
   });
 
   socket.on("cheer", ({ instanceId }) => {
