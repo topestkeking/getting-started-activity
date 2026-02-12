@@ -26,9 +26,20 @@ body {
   gap: 20px;
 }
 
+.header {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
 .header h1 {
   margin: 0;
   color: #7289da;
+}
+
+.logo {
+  height: 48px;
+  width: 48px;
 }
 
 .status {

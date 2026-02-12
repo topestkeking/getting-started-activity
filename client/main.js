@@ -1,6 +1,7 @@
 import './style.css';
 import { DiscordSDK } from "@discord/embedded-app-sdk";
 import { io } from "socket.io-client";
+import rocketLogo from '/rocket.png';
 
 let discordSdk;
 let socket;
@@ -113,6 +114,7 @@ function render() {
     <div class="game-container">
       ${game.winner ? renderWinnerOverlay() : ''}
       <div class="header">
+        <img src="${rocketLogo}" class="logo" alt="Discord" width="48" height="48" />
         <h1>Checkers</h1>
         <div class="status">${getStatusText()}</div>
       </div>
