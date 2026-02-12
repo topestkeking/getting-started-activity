@@ -52,13 +52,69 @@ async function setupDiscord() {
   }
 
   currentUser = auth.user;
+
+  // Subscribe to layout and orientation changes
+  discordSdk.subscribe('ACTIVITY_LAYOUT_MODE_UPDATE', ({ layout_mode }) => {
+    const app = document.querySelector('#app');
+    if (layout_mode === 1) { // PIP
+      app.classList.add('pip-mode');
+    } else {
+      app.classList.remove('pip-mode');
+    }
+  });
+
+  discordSdk.subscribe('ORIENTATION_UPDATE', ({ screen_orientation }) => {
+    const app = document.querySelector('#app');
+    if (screen_orientation === 0) { // PORTRAIT
+      app.classList.add('portrait-mode');
+    } else {
+      app.classList.remove('portrait-mode');
+    }
+  });
+}
+
+async function updateRichPresence() {
+  if (!gameState) return;
+  const { game, players } = gameState;
+  const redPlayer = players.find(p => p.role === PIECES.RED);
+  const blackPlayer = players.find(p => p.role === PIECES.BLACK);
+
+  let stateText = 'In a match';
+  if (game.winner) {
+    stateText = game.winner === PIECES.RED ? 'Red won!' : 'Black won!';
+  } else if (redPlayer && blackPlayer) {
+    stateText = `Red vs Black - Turn: ${game.turn === PIECES.RED ? 'Red' : 'Black'}`;
+  } else {
+    stateText = 'Waiting for players...';
+  }
+
+  await discordSdk.commands.setActivity({
+    activity: {
+      type: 0,
+      details: 'Playing Checkers',
+      state: stateText,
+      assets: {
+        large_image: 'rocket',
+        large_text: 'Checkers',
+      },
+    },
+  });
+}
+
+async function handleInvite() {
+  await discordSdk.commands.openInviteDialog();
 }
 
 function setupSocket() {
   socket = io();
 
-  socket.on('connect', () => {
+  socket.on('connect', async () => {
     console.log('Connected to server');
+
+    // Sync participants with Discord for accuracy
+    const participants = await discordSdk.commands.getInstanceConnectedParticipants();
+    console.log('Active participants:', participants);
+
     socket.emit('join', {
       instanceId: discordSdk?.instanceId || 'test-instance',
       user: {
@@ -73,6 +129,7 @@ function setupSocket() {
   socket.on('state', (state) => {
     gameState = state;
     render();
+    updateRichPresence();
   });
 
   socket.on('timer', (timeLeft) => {
@@ -91,9 +148,22 @@ function render() {
   const app = document.querySelector('#app'), active = document.activeElement?.dataset;
   if (!gameState) return (app.innerHTML = '<h1>Loading...</h1>');
   const { game, players } = gameState;
+  const winAnnounce = game.winner ? `
+    <div class="winner-announcement">
+      <h2>🎉 ${game.winner === PIECES.RED ? 'RED' : 'BLACK'} WINS! 🎉</h2>
+      <button onclick="socket.emit('reset', { instanceId: discordSdk.instanceId })">Play Again</button>
+    </div>` : '';
+
   app.innerHTML = `
+    ${winAnnounce}
     <main class="game-container">
-      <header class="header"><h1>Checkers</h1><div class="status" aria-live="polite">${getStatusText()}</div></header>
+      <header class="header">
+        <div class="header-top">
+          <h1>Checkers</h1>
+          <button id="invite-btn" class="secondary" aria-label="Invite Friends">Invite 👥</button>
+        </div>
+        <div class="status" aria-live="polite">${getStatusText()}</div>
+      </header>
       <div class="main-layout">
         <aside class="player-list side" aria-label="Players">
           ${players.map(p => `<div class="player-item ${game.turn === p.role ? 'active' : ''}" data-user-id="${p.id}">
@@ -102,9 +172,11 @@ function render() {
           </div>`).join('')}
         </aside>
         <section class="board-container"><div class="board" role="grid">${renderBoard(game.board)}</div>
-          <div class="controls"><div class="timer" id="timer-display">Time: ${gameState.timeLeft}s</div>
+          <div class="controls">
+            <div class="timer" id="timer-display">Time: ${gameState.timeLeft}s</div>
             <button id="cheer-btn" aria-label="Cheer">Cheer! 📣</button>
             <button id="reset-btn" aria-label="Reset Game">Reset Game</button>
+            ${getSpectatorControls(players)}
           </div>
         </section>
       </div>
@@ -115,15 +187,41 @@ function render() {
   });
   document.getElementById('cheer-btn').onclick = () => socket.emit('cheer', { instanceId: discordSdk.instanceId });
   document.getElementById('reset-btn').onclick = () => confirm('Reset game?') && socket.emit('reset', { instanceId: discordSdk.instanceId });
+  document.getElementById('invite-btn').onclick = handleInvite;
+  const joinBtn = document.getElementById('join-btn');
+  if (joinBtn) {
+    joinBtn.onclick = () => socket.emit('join', {
+      instanceId: discordSdk.instanceId,
+      user: {
+        id: currentUser.id,
+        username: currentUser.username,
+        avatar: currentUser.avatar,
+        global_name: currentUser.global_name,
+      }
+    });
+  }
   if (active?.r) document.querySelector(`.cell[data-r="${active.r}"][data-c="${active.c}"]`)?.focus();
 }
 
 function renderBoard(board) {
-  return board.flatMap((row, r) => row.map((piece, c) => `
-    <div class="cell ${(r + c) % 2 ? 'dark' : 'light'} ${selectedPiece?.r === r && selectedPiece?.c === c ? 'selected' : ''}"
+  const { players } = gameState;
+  const myPlayer = players.find(p => p.id === currentUser.id);
+  const shouldFlip = myPlayer?.role === PIECES.BLACK;
+
+  let displayBoard = board.map((row, r) => row.map((piece, c) => ({ piece, r, c })));
+
+  if (shouldFlip) {
+    displayBoard = displayBoard.slice().reverse().map(row => row.slice().reverse());
+  }
+
+  return displayBoard.flatMap((row) => row.map(({ piece, r, c }) => {
+    const isValid = isPossibleMove(r, c);
+    return `
+    <div class="cell ${(r + c) % 2 ? 'dark' : 'light'} ${selectedPiece?.r === r && selectedPiece?.c === c ? 'selected' : ''} ${isValid ? 'valid-move' : ''}"
          data-r="${r}" data-c="${c}" tabindex="0" role="gridcell" aria-label="${'ABCDEFGH'[c]}${8 - r}: ${getPieceDesc(piece)}">
       ${renderPiece(piece)}
-    </div>`)).join('');
+    </div>`;
+  })).join('');
 }
 
 function renderPiece(p) {
@@ -162,15 +260,34 @@ function handleCellClick(r, c) {
 
 function isPossibleMove(r, c) {
   if (!selectedPiece || !gameState) return false;
-  // This is a simple client-side check to highlight potential moves.
-  // The server has the final say.
-  // For simplicity, we could just let the server decide everything,
-  // but highlighting helps UX.
   const { game } = gameState;
-  // We can't easily check all rules here without duplicating logic,
-  // but we can check if it's one of the valid moves for the selected piece.
-  // (Note: mandatory jumps make this tricky if we don't have full logic here)
-  return false; // Disable highlighting for now to avoid bugs, or implement light version
+
+  // Find if this cell is a valid destination for the selected piece
+  return game.mandatoryJumpMoves.some(m =>
+    m.from.r === selectedPiece.r && m.from.c === selectedPiece.c &&
+    m.to.r === r && m.to.c === c
+  ) || (game.mandatoryJumpMoves.length === 0 && canPieceMoveTo(selectedPiece, r, c));
+}
+
+function canPieceMoveTo(from, r, c) {
+  const piece = gameState.game.board[from.r][from.c];
+  const owner = getPieceOwner(piece);
+  const isKing = piece === PIECES.RED_KING || piece === PIECES.BLACK_KING;
+
+  if (gameState.game.board[r][c] !== PIECES.EMPTY) return false;
+
+  const dr = r - from.r;
+  const dc = Math.abs(c - from.c);
+
+  if (dc !== 1) return false;
+
+  if (owner === PIECES.RED || isKing) {
+    if (dr === -1) return true;
+  }
+  if (owner === PIECES.BLACK || isKing) {
+    if (dr === 1) return true;
+  }
+  return false;
 }
 
 function getPieceOwner(piece) {
@@ -191,6 +308,19 @@ function getRoleName(role) {
   if (role === PIECES.RED) return 'Red';
   if (role === PIECES.BLACK) return 'Black';
   return 'Spectator';
+}
+
+function getSpectatorControls(players) {
+  const myPlayer = players.find(p => p.id === currentUser.id);
+  if (myPlayer && myPlayer.role !== 'spectator') return '';
+
+  const redOccupied = players.some(p => p.role === PIECES.RED);
+  const blackOccupied = players.some(p => p.role === PIECES.BLACK);
+
+  if (!redOccupied || !blackOccupied) {
+    return `<button id="join-btn" class="primary">Join Game ⚔️</button>`;
+  }
+  return '';
 }
 
 function getAvatarUrl(user) {
