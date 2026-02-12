@@ -22,9 +22,22 @@ export function getUserData(userId) {
 export function updateUserData(userId, winsDelta, matchesDelta) {
   const storage = getStorage();
   const userData = storage[userId] || { wins: 0, matches: 0 };
-  userData.wins += winsDelta;
-  userData.matches += matchesDelta;
+  userData.wins += (winsDelta || 0);
+  userData.matches += (matchesDelta || 0);
   storage[userId] = userData;
   saveStorage(storage);
   return userData;
+}
+
+export function storeOAuthTokens(userId, tokens) {
+  const storage = getStorage();
+  const userData = storage[userId] || { wins: 0, matches: 0 };
+  userData.tokens = tokens;
+  storage[userId] = userData;
+  saveStorage(storage);
+}
+
+export function getOAuthTokens(userId) {
+  const storage = getStorage();
+  return storage[userId]?.tokens;
 }

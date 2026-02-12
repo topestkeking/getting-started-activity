@@ -3,8 +3,13 @@ import dotenv from "dotenv";
 import { Server } from "socket.io";
 import { createServer } from "http";
 import { WebSocket } from "ws";
+import {
+  InteractionType,
+  InteractionResponseType,
+  verifyKeyMiddleware,
+} from "discord-interactions";
 import { CheckersGame, PIECES } from "./game.js";
-import { updateUserData } from "./storage.js";
+import { updateUserData, storeOAuthTokens, getOAuthTokens, getUserData } from "./storage.js";
 
 dotenv.config({ path: "../.env" });
 
@@ -39,17 +44,59 @@ app.post("/api/token", async (req, res) => {
       return res.status(response.status).send(errorData);
     }
 
-    const { access_token } = await response.json();
+    const tokens = await response.json();
 
-    if (!access_token) {
+    if (!tokens.access_token) {
       return res.status(502).send({ error: "No access token received from Discord" });
     }
 
-    res.send({ access_token });
+    // We need the user ID to store tokens, so we'll fetch it if not provided
+    // In a real app, you'd use a session or JWT
+    const userResponse = await fetch(`https://discord.com/api/v10/users/@me`, {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    const user = await userResponse.json();
+
+    if (user.id) {
+      storeOAuthTokens(user.id, tokens);
+    }
+
+    res.send({ access_token: tokens.access_token });
   } catch (error) {
     console.error("Error exchanging token:", error);
     res.status(500).send({ error: "Internal server error" });
   }
+});
+
+/**
+ * Discord Interactions Endpoint
+ */
+app.post('/interactions', verifyKeyMiddleware(process.env.DISCORD_PUBLIC_KEY), (req, res) => {
+  const { type, data, context, member, user } = req.body;
+
+  if (type === InteractionType.PING) {
+    return res.send({ type: InteractionResponseType.PONG });
+  }
+
+  if (type === InteractionType.APPLICATION_COMMAND) {
+    const { name } = data;
+
+    if (name === 'Checkers Stats') {
+      // User Command (context menu) or Slash Command
+      // The target user for a User Command is in data.target_id
+      const targetId = data.target_id || (user || member.user).id;
+      const stats = getUserData(targetId);
+
+      return res.send({
+        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          content: `📊 **Checkers Stats for <@${targetId}>**\n- Wins: ${stats.wins}\n- Total Matches: ${stats.matches}`,
+        },
+      });
+    }
+  }
+
+  return res.status(400).send('Unknown interaction type');
 });
 
 app.put("/api/users/@me/metadata", async (req, res) => {
@@ -83,6 +130,71 @@ app.put("/api/users/@me/metadata", async (req, res) => {
   } catch (error) {
     console.error("Error updating metadata:", error);
     res.status(500).send({ error: "Internal server error" });
+  }
+});
+
+/**
+ * Route to initiate the Linked Role connection flow.
+ */
+app.get('/linked-role', (req, res) => {
+  const url = new URL('https://discord.com/api/oauth2/authorize');
+  url.searchParams.set('client_id', process.env.VITE_DISCORD_CLIENT_ID);
+  url.searchParams.set('redirect_uri', process.env.DISCORD_REDIRECT_URI || 'http://localhost:3001/linked-role-verify');
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', 'identify role_connections.write');
+  url.searchParams.set('prompt', 'consent');
+  res.redirect(url.toString());
+});
+
+/**
+ * Route that Discord redirects back to after the user has authorized the app for role connections.
+ */
+app.get('/linked-role-verify', async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.status(400).send('Missing code');
+
+  try {
+    const response = await fetch(`https://discord.com/api/oauth2/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: process.env.VITE_DISCORD_CLIENT_ID,
+        client_secret: process.env.DISCORD_CLIENT_SECRET,
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: process.env.DISCORD_REDIRECT_URI || 'http://localhost:3001/linked-role-verify',
+      }),
+    });
+
+    const tokens = await response.json();
+    if (!tokens.access_token) return res.status(502).send('Failed to exchange token');
+
+    // Fetch user info to get the ID
+    const userRes = await fetch('https://discord.com/api/v10/users/@me', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    const user = await userRes.json();
+
+    // Store tokens and sync metadata
+    storeOAuthTokens(user.id, tokens);
+
+    const { wins, matches } = updateUserData(user.id, 0, 0);
+    await fetch(`https://discord.com/api/v10/users/@me/applications/${process.env.VITE_DISCORD_CLIENT_ID}/role-connection`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${tokens.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        platform_name: 'Checkers Deluxe',
+        metadata: { wins, matches },
+      }),
+    });
+
+    res.send('<h1>Success!</h1><p>Your Checkers stats are now linked to Discord. You can close this window.</p>');
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('Verification failed');
   }
 });
 
@@ -168,6 +280,45 @@ function handleEvent(event, data) {
 
 setupGateway();
 // ------------------------------------------
+
+async function getAccessToken(userId) {
+  const tokens = getOAuthTokens(userId);
+  if (!tokens) return null;
+
+  // Simple check for expiration (Discord tokens last 7 days)
+  // For a robust app, you'd store the expiration timestamp
+  // Here we'll just implement the refresh logic as a helper
+  return tokens.access_token;
+}
+
+async function refreshToken(userId) {
+  const tokens = getOAuthTokens(userId);
+  if (!tokens?.refresh_token) return null;
+
+  try {
+    const response = await fetch(`https://discord.com/api/oauth2/token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        client_id: process.env.VITE_DISCORD_CLIENT_ID,
+        client_secret: process.env.DISCORD_CLIENT_SECRET,
+        grant_type: "refresh_token",
+        refresh_token: tokens.refresh_token,
+      }),
+    });
+
+    if (response.ok) {
+      const newTokens = await response.json();
+      storeOAuthTokens(userId, newTokens);
+      return newTokens.access_token;
+    }
+  } catch (e) {
+    console.error('Failed to refresh token for user', userId, e);
+  }
+  return null;
+}
 
 function broadcastState(instanceId) {
   const state = gameStates.get(instanceId);

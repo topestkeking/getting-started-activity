@@ -28,17 +28,30 @@ This document summarizes the progress against the Discord Activity requirements 
 2. Add the following metadata fields:
    - `wins` (Integer): Matches Won
    - `matches` (Integer): Total Matches Played
-3. Set the **Linked Roles Verification URL** to `https://your-domain.com/linked-role-verify`. (Note: You may need a dedicated endpoint for the "Link" button in Discord settings, but the `PUT` endpoint is already implemented for syncing).
+3. Set the **Linked Roles Verification URL** to `https://your-domain.com/linked-role`.
+4. In the **OAuth2** tab, add `https://your-domain.com/linked-role-verify` to your **Redirects**.
 
-### 3. Environment & Hosting
+### 3. User-Installable App & Interactions
+1. In the **General Information** tab, set the **Interactions Endpoint URL** to `https://your-domain.com/interactions`.
+2. Add `DISCORD_PUBLIC_KEY=your_public_key_here` to your `.env` file for signature verification.
+3. In the **Installation** tab:
+   - Ensure **User Install** is checked.
+   - Add the following **Install Link** scopes: `identify`, `applications.commands`, `guilds`, `role_connections.write`.
+4. Register a **User Command** via the Discord API or a tool like `slash-register`:
+   - Name: `Checkers Stats`
+   - Type: `USER` (2)
+   - Integration Types: `GUILD_INSTALL` (0), `USER_INSTALL` (1)
+   - Contexts: `GUILD` (0), `BOT_DM` (1), `PRIVATE_CHANNEL` (2)
+
+### 4. Environment & Hosting
 - **SSL/HTTPS**: The Activity must be served over HTTPS.
-- **Production Secrets**: Ensure `VITE_DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET` are securely set in the production environment (not checked into source).
+- **Production Secrets**: Ensure `VITE_DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, and `DISCORD_PUBLIC_KEY` are securely set in the production environment.
 - **Domain Verification**: Verify the hosting domain in the Discord Dev Portal if required for specific features.
 
-### 3. Review Process
+### 6. Review Process
 - **Discord Review**: Submit the Activity for review through the Developer Portal once all tests pass in a production-like sandbox.
 
-### 4. Gateway Integration (Backend)
+### 5. Gateway Integration (Backend)
 - **Bot Token**:
   1. Go to the **Bot** tab in the Developer Portal.
   2. Click **Reset Token** to get a new token.
