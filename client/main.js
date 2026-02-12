@@ -43,6 +43,7 @@ async function setupDiscord() {
       'identify',
       'guilds',
       'applications.commands.permissions.update',
+      'role_connections.write',
     ],
   });
 
@@ -100,6 +101,20 @@ async function setupDiscord() {
   });
 }
 
+async function pushMetadata() {
+  if (!auth || !currentUser) return;
+  try {
+    await fetch('/api/users/@me/metadata', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ access_token: auth.access_token, userId: currentUser.id }),
+    });
+    console.log('Metadata pushed to Discord');
+  } catch (e) {
+    console.error('Failed to push metadata:', e);
+  }
+}
+
 async function updateRichPresence() {
   if (!gameState) return;
   const { game, players } = gameState;
@@ -154,9 +169,14 @@ function setupSocket() {
   });
 
   socket.on('state', (state) => {
+    const prevWinner = gameState?.game?.winner;
     gameState = state;
     render();
     updateRichPresence();
+
+    if (gameState.game.winner && !prevWinner) {
+      pushMetadata();
+    }
   });
 
   socket.on('timer', (timeLeft) => {

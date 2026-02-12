@@ -2,7 +2,9 @@ import express from "express";
 import dotenv from "dotenv";
 import { Server } from "socket.io";
 import { createServer } from "http";
+import { WebSocket } from "ws";
 import { CheckersGame, PIECES } from "./game.js";
+import { updateUserData } from "./storage.js";
 
 dotenv.config({ path: "../.env" });
 
@@ -50,6 +52,40 @@ app.post("/api/token", async (req, res) => {
   }
 });
 
+app.put("/api/users/@me/metadata", async (req, res) => {
+  const { access_token, userId } = req.body;
+  if (!access_token || !userId) return res.status(400).send({ error: "Missing token or userId" });
+
+  try {
+    const { wins, matches } = updateUserData(userId, 0, 0); // Get current
+
+    const response = await fetch(`https://discord.com/api/v10/users/@me/applications/${process.env.VITE_DISCORD_CLIENT_ID}/role-connection`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        platform_name: 'Checkers Deluxe',
+        metadata: {
+          wins,
+          matches,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      return res.status(response.status).send(errorData);
+    }
+
+    res.send(await response.json());
+  } catch (error) {
+    console.error("Error updating metadata:", error);
+    res.status(500).send({ error: "Internal server error" });
+  }
+});
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
@@ -58,6 +94,80 @@ const io = new Server(httpServer, {
 });
 
 const gameStates = new Map(); // instanceId -> { game, players: Map, timer, timeLeft }
+
+// --- Discord Gateway Client (Skeleton) ---
+let gatewayWs = null;
+let heartbeatInterval = null;
+
+function setupGateway() {
+  const token = process.env.DISCORD_BOT_TOKEN;
+  if (!token) {
+    console.warn("DISCORD_BOT_TOKEN not found. Gateway connection skipped.");
+    return;
+  }
+
+  gatewayWs = new WebSocket("wss://gateway.discord.gg/?v=10&encoding=json");
+
+  gatewayWs.on("open", () => {
+    console.log("Connected to Discord Gateway");
+  });
+
+  gatewayWs.on("message", (data) => {
+    const payload = JSON.parse(data);
+    const { op, d, t, s } = payload;
+
+    switch (op) {
+      case 10: // Hello
+        const { heartbeat_interval } = d;
+        startHeartbeat(heartbeat_interval);
+        identify();
+        break;
+      case 11: // Heartbeat ACK
+        // console.log("Heartbeat ACK received");
+        break;
+      case 0: // Dispatch
+        handleEvent(t, d);
+        break;
+    }
+  });
+
+  gatewayWs.on("close", () => {
+    console.log("Gateway connection closed. Reconnecting...");
+    clearInterval(heartbeatInterval);
+    setTimeout(setupGateway, 5000);
+  });
+}
+
+function startHeartbeat(interval) {
+  heartbeatInterval = setInterval(() => {
+    gatewayWs.send(JSON.stringify({ op: 1, d: null }));
+  }, interval);
+}
+
+function identify() {
+  gatewayWs.send(JSON.stringify({
+    op: 2,
+    d: {
+      token: process.env.DISCORD_BOT_TOKEN,
+      intents: 513, // GUILD_MEMBERS | GUILDS (Example)
+      properties: {
+        os: "linux",
+        browser: "my_activity_server",
+        device: "my_activity_server"
+      }
+    }
+  }));
+}
+
+function handleEvent(event, data) {
+  // console.log("Received event:", event);
+  if (event === "READY") {
+    console.log("Gateway is READY!");
+  }
+}
+
+setupGateway();
+// ------------------------------------------
 
 function broadcastState(instanceId) {
   const state = gameStates.get(instanceId);
@@ -156,6 +266,17 @@ io.on("connection", (socket) => {
     if (moved) {
       resetTimer(instanceId);
       broadcastState(instanceId);
+
+      // Handle winner metadata update
+      if (state.game.winner) {
+        const winner = [...state.players.values()].find(p => p.role === state.game.winner);
+        const loser = [...state.players.values()].find(p => p.role !== state.game.winner && p.role !== 'spectator');
+
+        if (winner) updateUserData(winner.id, 1, 1);
+        if (loser) updateUserData(loser.id, 0, 1);
+
+        console.log(`Game over in ${instanceId}. Winner: ${winner?.username}`);
+      }
     }
   });
 

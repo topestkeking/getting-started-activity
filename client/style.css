@@ -42,7 +42,13 @@ body {
 .status {
   font-size: 1.2em;
   font-weight: bold;
-  margin-top: 5px;
+  margin-top: 10px;
+  padding: 5px 15px;
+  background: rgba(88, 101, 242, 0.1);
+  border-radius: 20px;
+  border: 1px solid rgba(88, 101, 242, 0.3);
+  text-shadow: 0 0 5px rgba(88, 101, 242, 0.5);
+  display: inline-block;
 }
 
 .main-layout {
@@ -97,9 +103,11 @@ body {
   display: grid;
   grid-template-columns: repeat(8, 60px);
   grid-template-rows: repeat(8, 60px);
-  border: 4px solid #1e1e1e;
-  box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+  border: 4px solid #5865f2; /* Blurple border */
+  box-shadow: 0 10px 30px rgba(88, 101, 242, 0.3), 0 0 10px rgba(88, 101, 242, 0.5);
   transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 4px;
+  overflow: hidden;
 }
 
 .cell {
@@ -113,11 +121,13 @@ body {
 }
 
 .cell.light {
-  background-color: #ebecd0;
+  background-color: #36393f; /* Discord secondary dark */
+  box-shadow: inset 0 0 5px rgba(0,0,0,0.2);
 }
 
 .cell.dark {
-  background-color: #779556; /* Classic chess/checkers dark green */
+  background-color: #2f3136; /* Discord tertiary dark */
+  box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
 }
 
 .cell.selected {
@@ -160,13 +170,15 @@ body {
 }
 
 .piece.red {
-  background: radial-gradient(circle at 30% 30%, #ff5f5f, #b30000);
-  border: 2px solid #800000;
+  background: linear-gradient(135deg, #ed4245 0%, #a62d30 100%); /* Discord Red */
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.6), inset 0 2px 4px rgba(255,255,255,0.3);
 }
 
 .piece.black {
-  background: radial-gradient(circle at 30% 30%, #444, #111);
-  border: 2px solid #000;
+  background: linear-gradient(135deg, #4f545c 0%, #23272a 100%); /* Discord Gray/Dark */
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.6), inset 0 2px 4px rgba(255,255,255,0.1);
 }
 
 .piece.king::before {
