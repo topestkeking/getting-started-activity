@@ -105,8 +105,26 @@ function startTimer(instanceId) {
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
-  socket.on("join", ({ instanceId, user }) => {
+  socket.on("join", async ({ instanceId, accessToken }) => {
     socket.join(instanceId);
+
+    let user;
+    try {
+      // Fetch user info from Discord API to verify identity (Security Best Practice)
+      const response = await fetch(`https://discord.com/api/users/@me`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+      user = await response.json();
+
+      if (!user.id) {
+        throw new Error("Invalid token or user data");
+      }
+    } catch (error) {
+      console.error("Failed to verify user:", error);
+      return;
+    }
 
     if (!gameStates.has(instanceId)) {
       gameStates.set(instanceId, {

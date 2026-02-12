@@ -1,7 +1,13 @@
 import './style.css';
-import { DiscordSDK } from "@discord/embedded-app-sdk";
+import { DiscordSDK, patchUrlMappings } from "@discord/embedded-app-sdk";
 import { io } from "socket.io-client";
 import rocketLogo from '/rocket.png';
+
+// Use patchUrlMappings if needed (e.g. for production deployment)
+if (typeof window !== 'undefined' && import.meta.env.PROD) {
+  // In a real deployment, you would map your backend URL here
+  // patchUrlMappings([{ prefix: '/api', target: 'your-app.com/api' }]);
+}
 
 let discordSdk;
 let socket;
@@ -63,12 +69,7 @@ function setupSocket() {
     console.log('Connected to server');
     socket.emit('join', {
       instanceId: discordSdk?.instanceId || 'test-instance',
-      user: {
-        id: currentUser.id,
-        username: currentUser.username,
-        avatar: currentUser.avatar,
-        global_name: currentUser.global_name,
-      }
+      accessToken: auth.access_token,
     });
   });
 
