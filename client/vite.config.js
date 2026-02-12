@@ -11,6 +11,10 @@ export default defineConfig({
         secure: false,
         ws: true,
       },
+      '/socket.io': {
+        target: 'http://localhost:3001',
+        ws: true,
+      },
     },
     hmr: {
       clientPort: 443,
