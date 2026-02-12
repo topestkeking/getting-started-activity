@@ -88,90 +88,52 @@ function setupSocket() {
 }
 
 function render() {
-  const app = document.querySelector('#app');
-  if (!gameState) {
-    app.innerHTML = '<h1>Loading...</h1>';
-    return;
-  }
-
+  const app = document.querySelector('#app'), active = document.activeElement?.dataset;
+  if (!gameState) return (app.innerHTML = '<h1>Loading...</h1>');
   const { game, players } = gameState;
-  const myPlayer = players.find(p => p.id === currentUser.id);
-  const isMyTurn = myPlayer && myPlayer.role === game.turn;
-
-  let html = `
-    <div class="game-container">
-      <div class="header">
-        <h1>Checkers</h1>
-        <div class="status">${getStatusText()}</div>
-      </div>
-
+  app.innerHTML = `
+    <main class="game-container">
+      <header class="header"><h1>Checkers</h1><div class="status" aria-live="polite">${getStatusText()}</div></header>
       <div class="main-layout">
-        <div class="player-list side">
-          <h3>Players</h3>
-          ${players.map(p => `
-            <div class="player-item ${game.turn === p.role ? 'active' : ''}" data-user-id="${p.id}">
-              <img src="${getAvatarUrl(p)}" class="avatar" />
-              <span>${p.global_name || p.username}</span>
-              <span class="role">(${getRoleName(p.role)})</span>
-            </div>
-          `).join('')}
-        </div>
-
-        <div class="board-container">
-          <div class="board">
-            ${renderBoard(game.board)}
+        <aside class="player-list side" aria-label="Players">
+          ${players.map(p => `<div class="player-item ${game.turn === p.role ? 'active' : ''}" data-user-id="${p.id}">
+            <img src="${getAvatarUrl(p)}" class="avatar" alt="${p.username}'s avatar" width="32" height="32" />
+            <span>${p.global_name || p.username}</span> <span class="role">(${getRoleName(p.role)})</span>
+          </div>`).join('')}
+        </aside>
+        <section class="board-container"><div class="board" role="grid">${renderBoard(game.board)}</div>
+          <div class="controls"><div class="timer" id="timer-display">Time: ${gameState.timeLeft}s</div>
+            <button id="cheer-btn" aria-label="Cheer">Cheer! 📣</button>
+            <button id="reset-btn" aria-label="Reset Game">Reset Game</button>
           </div>
-          <div class="controls">
-            <div class="timer" id="timer-display">Time: ${gameState.timeLeft}s</div>
-            <button id="cheer-btn">Cheer! 📣</button>
-            <button id="reset-btn">Reset Game</button>
-          </div>
-        </div>
+        </section>
       </div>
-    </div>
-  `;
-
-  app.innerHTML = html;
-
-  // Add event listeners
-  document.querySelectorAll('.cell').forEach(cell => {
-    cell.onclick = () => handleCellClick(parseInt(cell.dataset.r), parseInt(cell.dataset.c));
+    </main>`;
+  document.querySelectorAll('.cell').forEach(el => {
+    el.onclick = () => handleCellClick(+el.dataset.r, +el.dataset.c);
+    el.onkeydown = (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), el.click());
   });
-
-  document.getElementById('cheer-btn').onclick = () => {
-    socket.emit('cheer', { instanceId: discordSdk.instanceId });
-  };
-
-  document.getElementById('reset-btn').onclick = () => {
-    socket.emit('reset', { instanceId: discordSdk.instanceId });
-  };
+  document.getElementById('cheer-btn').onclick = () => socket.emit('cheer', { instanceId: discordSdk.instanceId });
+  document.getElementById('reset-btn').onclick = () => confirm('Reset game?') && socket.emit('reset', { instanceId: discordSdk.instanceId });
+  if (active?.r) document.querySelector(`.cell[data-r="${active.r}"][data-c="${active.c}"]`)?.focus();
 }
 
 function renderBoard(board) {
-  let cells = '';
-  for (let r = 0; r < 8; r++) {
-    for (let c = 0; c < 8; c++) {
-      const piece = board[r][c];
-      const isDark = (r + c) % 2 === 1;
-      const isSelected = selectedPiece && selectedPiece.r === r && selectedPiece.c === c;
-      const isValidMove = isPossibleMove(r, c);
-
-      cells += `
-        <div class="cell ${isDark ? 'dark' : 'light'} ${isSelected ? 'selected' : ''} ${isValidMove ? 'valid-move' : ''}"
-             data-r="${r}" data-c="${c}">
-          ${renderPiece(piece)}
-        </div>
-      `;
-    }
-  }
-  return cells;
+  return board.flatMap((row, r) => row.map((piece, c) => `
+    <div class="cell ${(r + c) % 2 ? 'dark' : 'light'} ${selectedPiece?.r === r && selectedPiece?.c === c ? 'selected' : ''}"
+         data-r="${r}" data-c="${c}" tabindex="0" role="gridcell" aria-label="${'ABCDEFGH'[c]}${8 - r}: ${getPieceDesc(piece)}">
+      ${renderPiece(piece)}
+    </div>`)).join('');
 }
 
-function renderPiece(piece) {
-  if (piece === PIECES.EMPTY) return '';
-  const isRed = piece === PIECES.RED || piece === PIECES.RED_KING;
-  const isKing = piece === PIECES.RED_KING || piece === PIECES.BLACK_KING;
-  return `<div class="piece ${isRed ? 'red' : 'black'} ${isKing ? 'king' : ''}"></div>`;
+function renderPiece(p) {
+  if (p === PIECES.EMPTY) return '';
+  return `<div class="piece ${p < 3 && p !== 0 ? (p === 1 ? 'red' : 'black') : (p === 3 ? 'red king' : 'black king')}" aria-hidden="true"></div>`;
+}
+
+function getPieceDesc(p) {
+  if (p === PIECES.EMPTY) return 'Empty';
+  return `${p === 1 || p === 3 ? 'Red' : 'Black'} ${p > 2 ? 'King' : 'Pawn'}`;
 }
 
 function handleCellClick(r, c) {

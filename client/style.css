@@ -115,6 +115,8 @@ body {
   background-color: rgba(255, 255, 0, 0.5) !important;
 }
 
+.cell:focus-visible { outline: 3px solid #7289da; z-index: 1; }
+
 .cell.valid-move::after {
   content: '';
   width: 20px;
